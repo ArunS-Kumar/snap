@@ -1,0 +1,43 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      docker: 18
+  pre_build:
+    commands:
+       - echo "Logging in to ECR..."
+       - aws --version
+       - $(aws ecr get-login --region $AWS_DEFAULT_REGION --no-include-email)
+       - echo "Logged in to ECR"
+       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-8)
+       - IMAGE_TAG=${COMMIT_HASH:=latest}
+  build:
+    commands:
+      - echo "Building Api image..."
+      - docker build --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} --file .docker/production//Dockerfile -t="$API_IMAGE_NAME:latest" .
+      - echo "Api image built successfuly."
+      - echo "Building Worker image..."
+      - docker build --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} --file .docker/production//QWorker/Dockerfile -t="$WORKER_IMAGE_NAME:latest" .
+      - echo "Worker image built successfuly."
+      - echo "Tagging Api image... "
+      - docker tag $API_IMAGE_NAME:latest $REPOSITORY_URI/$API_IMAGE_NAME:$IMAGE_TAG
+      - docker tag $API_IMAGE_NAME:latest $REPOSITORY_URI/$API_IMAGE_NAME:$ENVIRONMENT_TAG
+      - echo "Tagging Worker image..."
+      - docker tag $WORKER_IMAGE_NAME:latest $REPOSITORY_URI/$WORKER_IMAGE_NAME:$IMAGE_TAG
+      - docker tag $WORKER_IMAGE_NAME:latest $REPOSITORY_URI/$WORKER_IMAGE_NAME:$ENVIRONMENT_TAG
+  post_build:
+    commands:
+      - echo "Pushing Api image..."
+      - docker push $REPOSITORY_URI/$API_IMAGE_NAME:$IMAGE_TAG
+      - docker push $REPOSITORY_URI/$API_IMAGE_NAME:$ENVIRONMENT_TAG
+      - echo "Pushing Worker image..."
+      - docker push $REPOSITORY_URI/$WORKER_IMAGE_NAME:$IMAGE_TAG
+      - docker push $REPOSITORY_URI/$WORKER_IMAGE_NAME:$ENVIRONMENT_TAG
+      - printf '[{"name":"%s","imageUri":"%s"}]' $API_CONTAINER_NAME $REPOSITORY_URI/$API_IMAGE_NAME:$IMAGE_TAG > api_imagedefs.json
+      - printf '[{"name":"%s","imageUri":"%s"}]' $WORKER_CONTAINER_NAME $REPOSITORY_URI/$WORKER_IMAGE_NAME:$IMAGE_TAG > worker_imagedefs.json
+artifacts:
+  discard-paths: yes
+  files:
+    - api_imagedefs.json
+    - worker_imagedefs.json
